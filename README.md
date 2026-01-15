@@ -159,10 +159,10 @@ Và tiếp tục theo hướng dẫn trong thư mục law-crawler [README.md](./
 cd backend
 ```
 
--   Start các services với 1 lệnh docker-compose:
+-   Start các services với 1 lệnh docker compose:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 #### PORT BINDING
@@ -263,9 +263,7 @@ Mọi đóng góp của các bạn đều được trân trọng, đừng ngần
 
 ## Liên hệ
 
--   Trần Gia Huy: giahuytran2002@gmail.com
--   Lê Nguyễn Bảo Đăng: lnbdang@gmail.com
--   Vũ Thái Hà: hab2016960@student.ctu.edu.vn
+
 
 ## 📝 License
 
