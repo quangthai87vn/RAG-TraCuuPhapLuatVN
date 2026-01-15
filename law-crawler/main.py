@@ -1,190 +1,293 @@
-"""
-  Copyright (C) 2023 tghuy
-
-  This file is part of VN-Law-Advisor.
-
-  VN-Law-Advisor is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
-
-  VN-Law-Advisor is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with VN-Law-Advisor.  If not, see <http://www.gnu.org/licenses/>.
-"""
-
-from models.models import *
-from bs4 import BeautifulSoup
-from helper import *
 import os
 import json
 import uuid
+from bs4 import BeautifulSoup
 
-# CREATE-DROP Tất cả dữ liệu
-# db.drop_tables([PDMucLienQuan ,PDTable, PDFile , PDDieu, PDChuong, PDDeMuc, PDChuDe])
-# db.create_tables([PDMucLienQuan ,PDTable, PDFile, PDDieu, PDChuong , PDDeMuc, PDChuDe])
+from db import db
+from models.models import (
+    PDChuDe, PDDeMuc, PDChuong, PDDieu, PDTable, PDFile, PDMucLienQuan
+)
 
-checkpoint = "d8e4a3a0-254c-4593-967c-214ae12bcb0f.html"
+from helper import convert_roman_to_num, extract_input
 
-# Đọc Chủ đề
-print("Load Chủ Đề Từ File ...")
-with open("./phap-dien/chude.json", "r") as chude_file:
-    chudes = json.load(chude_file)
-chude_file.close()
 
-print("Insert tất cả chủ đề...")
-try:
-    with db.atomic():
-        PDChuDe.bulk_create([PDChuDe(ten=chude["Text"], stt=chude["STT"], id=chude["Value"]) for chude in chudes])
-    print("Inserted tất cả chủ đề pháp điển!")
-except:
-    pass
+# ====== Config ======
+CHUDE_PATH = "./phap-dien/chude.json"
+DEMUC_PATH = "./phap-dien/demuc.json"
+TREENODE_PATH = "./phap-dien/treeNode.json"
+DEMUC_DIR = "./phap-dien/demuc"
 
-# Đọc Đề mục
-print("Load Đề Mục Từ File ...")
-with open("./phap-dien/demuc.json", "r") as demuc_file:
-    demucs = json.load(demuc_file)
-demuc_file.close()
+# Muốn chạy full thì để None
+CHECKPOINT =  "d8e4a3a0-254c-4593-967c-214ae12bcb0f.html"
 
-print("Insert tất cả chủ đề...")
-try:
-    with db.atomic():
-        PDDeMuc.bulk_create(
-            [PDDeMuc(ten=demuc["Text"], stt=demuc["STT"], id=demuc["Value"], chude_id=demuc["ChuDe"]) for demuc in
-             demucs])
-except:
-    pass
-print("Inserted tất cả đề mục pháp điển!")
 
-print("Load Tree Nodes Từ File ...")
-with open("./phap-dien/treeNode.json", "r") as tree_nodes_file:
-    tree_nodes = json.load(tree_nodes_file)
-tree_nodes_file.close()
+def read_json(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-print("Insert tất cả nodes...")
-demuc_directory = os.fsencode("./phap-dien/demuc")
-dieus_lienquan = []
 
-count = 0
-if checkpoint:
-    isSkipping = True
-else:
-    isSkipping = False
-for file in os.listdir(demuc_directory):
-    file_name = os.fsdecode(file)
-    with open("./phap-dien/demuc/" + file_name, "r") as demuc_file:
-        count +=1
-        if file_name == checkpoint:
-            isSkipping = False
+def safe_int(x, default=0):
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+
+def text_of(tag):
+    if tag is None:
+        return ""
+    return tag.get_text(" ", strip=True)
+
+
+def next_sibling_skip_ws(node):
+    sib = node.next_sibling
+    while sib is not None and str(sib).strip() == "":
+        sib = sib.next_sibling
+    return sib
+
+
+def main():
+    # ===== 0) Reset DB =====
+    db.connect(reuse_if_open=True)
+    db.drop_tables([PDMucLienQuan, PDTable, PDFile, PDDieu, PDChuong, PDDeMuc, PDChuDe], safe=True)
+    db.create_tables([PDChuDe, PDDeMuc, PDChuong, PDDieu, PDFile, PDTable, PDMucLienQuan], safe=True)
+
+    # ===== 1) Load JSON =====
+    chudes = read_json(CHUDE_PATH)
+    demucs = read_json(DEMUC_PATH)
+    tree_nodes = read_json(TREENODE_PATH)
+
+    # Map nhanh
+    demuc_to_chude = {d["Value"]: d.get("ChuDe") for d in demucs if "Value" in d}
+
+    # ===== 2) Insert pdchude =====
+    print("Insert pdchude...")
+    for c in chudes:
+        cid = c.get("Value")
+        if not cid:
+            continue
+        PDChuDe.insert(
+            id=cid,
+            ten=c.get("Text", ""),
+            stt=safe_int(c.get("STT"), 0),
+        ).on_conflict_ignore().execute()
+    print("✅ pdchude done")
+
+    # ===== 3) Insert pddemuc =====
+    print("Insert pddemuc...")
+    for d in demucs:
+        did = d.get("Value")
+        if not did:
+            continue
+        chude_uuid = d.get("ChuDe")
+
+        # Nếu demuc trỏ tới chude không tồn tại -> log luôn
+        if chude_uuid and PDChuDe.get_or_none(PDChuDe.id == chude_uuid) is None:
+            print(f"⚠️ demuc {did} trỏ tới chude {chude_uuid} nhưng pdchude chưa có (skip)")
+            continue
+
+        PDDeMuc.insert(
+            id=did,
+            ten=d.get("Text", ""),
+            stt=safe_int(d.get("STT"), 0),
+            chude_id=chude_uuid,
+        ).on_conflict_ignore().execute()
+    print("✅ pddemuc done")
+
+    # ===== 4) Crawl HTML từng đề mục =====
+    files = sorted([f for f in os.listdir(DEMUC_DIR) if f.endswith(".html")])
+
+    isSkipping = CHECKPOINT is not None
+    lienquan_pairs = []
+
+    for file_name in files:
         if isSkipping:
-            continue
-        demuc_html = demuc_file.read()
-        demuc_html = BeautifulSoup(demuc_html, "html.parser")
-        demuc_nodes = [node for node in tree_nodes if node["DeMucID"] == file_name.split(".")[0]]
-        if len(demuc_nodes) == 0:
-            print("Không tìm thấy node cho đề mục: " + file_name)
-            demuc_file.close()
-            continue
-        demuc_chuong = [node for node in demuc_nodes if node["TEN"].startswith("Chương ")]
-        chuongs_data = []
-        for chuong in demuc_chuong:
-            mapc = chuong["MAPC"]
-            stt = convert_roman_to_num(chuong["ChiMuc"])
-            chuong_data = PDChuong(ten=chuong["TEN"],
-                                   mapc=mapc, chimuc=chuong["ChiMuc"],
-                                   stt = stt,
-                                   demuc_id=chuong["DeMucID"])
-            try:
-                PDChuong.create(ten=chuong["TEN"],
-                                mapc=mapc, chimuc=chuong["ChiMuc"],
-                                stt=stt,
-                                demuc_id=chuong["DeMucID"])
-            except:
-                continue
-            chuongs_data.append(chuong_data)
-
-        # Insert chương
-        print(f'Insert {len(demuc_chuong)} chương của đề mục {file_name}')
-        # Tạo một chương giả nếu không có chương
-        if len(chuongs_data) == 0:
-            chuong_data = PDChuong(ten="",
-                                   mapc= uuid.uuid4(), chimuc="0",
-                                   stt=0,
-                                   demuc_id=file_name.split(".")[0])
-            chuongs_data.append(chuong_data)
-
-        demuc_dieus = [node for node in demuc_nodes if node not in demuc_chuong]
-        print(f'Đề mục {file_name} có {len(demuc_chuong)} chương và {len(demuc_dieus)} điều')
-        stt = 0
-        for dieu in demuc_dieus:
-            if len(chuongs_data) == 1:
-                # Thêm chương giả
-                dieu["ChuongID"] = chuongs_data[0].mapc
+            if file_name == CHECKPOINT:
+                isSkipping = False
             else:
-                for chuong in chuongs_data:
-                    if dieu["MAPC"].startswith(chuong.mapc):
-                        dieu["ChuongID"] = chuong.mapc
-                        break
+                continue
 
-            mapc = dieu["MAPC"]
-            dieu_html = demuc_html.select(f'a[name="{mapc}"]')[0]
-            ten = dieu_html.nextSibling
-            ghi_chu_html = dieu_html.parent.nextSibling
-            vbqppl = ghi_chu_html.text if ghi_chu_html else None
-            vbqppl_link = ghi_chu_html.select("a")[0]["href"] if ghi_chu_html.select("a") else None
-            # print(ten, vbqppl, vbqppl_link)
-            noidung_html = dieu_html.parent.find_next("p", {"class": "pNoiDung"})
+        demuc_id = file_name.replace(".html", "")
+        demuc_obj = PDDeMuc.get_or_none(PDDeMuc.id == demuc_id)
+        if demuc_obj is None:
+            print(f"⚠️ Skip {file_name}: demuc_id={demuc_id} chưa có trong DB")
+            continue
+
+        chude_id = demuc_to_chude.get(demuc_id)
+        if chude_id is None:
+            print(f"⚠️ Skip {file_name}: không map được chude cho demuc {demuc_id}")
+            continue
+
+        # Lấy các node thuộc đề mục này
+        demuc_nodes = [n for n in tree_nodes if n.get("DeMucID") == demuc_id]
+        if not demuc_nodes:
+            print(f"⚠️ Không có tree node cho {file_name}")
+            continue
+
+        # Đọc HTML
+        html_path = os.path.join(DEMUC_DIR, file_name)
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            soup = BeautifulSoup(f.read(), "html.parser")
+
+        # --- chương nodes
+        chuong_nodes = [n for n in demuc_nodes if str(n.get("TEN", "")).startswith("Chương ")]
+        chuong_mapcs = []
+
+        for cn in chuong_nodes:
+            mapc = cn.get("MAPC")
+            if not mapc:
+                continue
+            PDChuong.insert(
+                mapc=mapc,
+                ten=cn.get("TEN", ""),
+                demuc_id=demuc_id,
+                chimuc=str(cn.get("ChiMuc", "")),
+                stt=convert_roman_to_num(cn.get("ChiMuc")),
+            ).on_conflict_ignore().execute()
+            chuong_mapcs.append(mapc)
+
+        # Nếu không có chương -> tạo chương giả
+        if not chuong_mapcs:
+            fake_mapc = str(uuid.uuid4())
+            PDChuong.insert(
+                mapc=fake_mapc,
+                ten="",
+                demuc_id=demuc_id,
+                chimuc="0",
+                stt=0,
+            ).on_conflict_ignore().execute()
+            chuong_mapcs.append(fake_mapc)
+
+        # --- dieu nodes (các node còn lại)
+        dieu_nodes = [n for n in demuc_nodes if n not in chuong_nodes and n.get("MAPC")]
+        print(f"📄 {file_name}: {len(chuong_mapcs)} chương | {len(dieu_nodes)} điều")
+
+        stt_dieu = 0
+        for dn in dieu_nodes:
+            mapc = dn.get("MAPC")
+            if not mapc:
+                continue
+
+            # chọn chương theo prefix MAPC (fallback: chương đầu tiên)
+            chuong_id = None
+            for cm in chuong_mapcs:
+                if str(mapc).startswith(str(cm)):
+                    chuong_id = cm
+                    break
+            if chuong_id is None:
+                chuong_id = chuong_mapcs[0]
+
+            # tìm anchor
+            a = soup.select_one(f'a[name="{mapc}"]')
+            if a is None:
+                # không có anchor thì bỏ qua
+                # (đây là lý do hay làm pddieu rỗng)
+                # print(f"⚠️ Không thấy anchor {mapc} trong {file_name}")
+                continue
+
+            # tên điều: thường là text ngay sau <a ...></a>
+            ten = ""
+            sib = next_sibling_skip_ws(a)
+            if sib is not None:
+                ten = str(sib).strip()
+            if not ten:
+                ten = dn.get("TEN", "")
+
+            # tìm p chứa anchor
+            p_anchor = a.find_parent("p")
+
+            # ghi chú VBQPPL
+            p_ghichu = None
+            if p_anchor:
+                p_ghichu = p_anchor.find_next_sibling("p", {"class": "pGhiChu"})
+            vbqppl = text_of(p_ghichu)
+            vbqppl_link = None
+            if p_ghichu:
+                link_tag = p_ghichu.select_one("a[href]")
+                if link_tag:
+                    vbqppl_link = link_tag.get("href")
+
+            # nội dung
+            p_noidung = None
+            if p_anchor:
+                p_noidung = p_anchor.find_next_sibling("p", {"class": "pNoiDung"})
+            if p_noidung is None:
+                # fallback
+                p_noidung = a.find_parent().find_next("p", {"class": "pNoiDung"})
+
             noidung = ""
             tables = []
-            for content in noidung_html.contents:
-                if content.name == "table":
-                    tables.append(str(content))
-                    continue
-                noidung += str(content.text.strip()) + "\n"
+            if p_noidung:
+                for child in p_noidung.contents:
+                    if getattr(child, "name", None) == "table":
+                        tables.append(str(child))
+                    else:
+                        if hasattr(child, "get_text"):
+                            noidung += child.get_text(" ", strip=True) + "\n"
+                        else:
+                            noidung += str(child).strip() + "\n"
 
+            # insert dieu (FK đều là string PK)
             try:
-                PDDieu.create(ten=ten, mapc=mapc, chimuc=dieu["ChiMuc"], stt=stt,
-                              noidung=noidung, vbqppl=vbqppl, vbqppl_link=vbqppl_link,
-                              demuc_id=dieu["DeMucID"], chuong_id=dieu["ChuongID"])
-            except:
+                PDDieu.insert(
+                    mapc=mapc,
+                    ten=ten,
+                    demuc_id=demuc_id,
+                    chuong_id=chuong_id,
+                    chude_id=chude_id,
+                    noidung=noidung.strip(),
+                    chimuc=safe_int(dn.get("ChiMuc"), 0),
+                    vbqppl=vbqppl,
+                    vbqppl_link=vbqppl_link,
+                    stt=stt_dieu,
+                ).on_conflict_ignore().execute()
+            except Exception as e:
+                print("❌ FAIL PDDieu:", mapc, "err:", e)
                 continue
-            for table in tables:
-                PDTable.create(dieu_id=mapc, html=table)
 
-            element = noidung_html.nextSibling
-            # Lấy link các file, biếu mẫu nếu có đính kèm
-            while element and element.name == "a":
-
-                link = element["href"]
+            # tables
+            for t in tables:
                 try:
-                    PDFile.create(dieu_id=dieu["MAPC"], link=link, path="")
-                except:
-                    print("Lỗi insert file " + link)
+                    PDTable.insert(dieu_id=mapc, html=t).on_conflict_ignore().execute()
+                except Exception as e:
+                    print("⚠️ FAIL PDTable:", mapc, e)
 
-                element = element.nextSibling
+            # file attachments: thường là các <a href> ngay sau pNoiDung
+            if p_noidung:
+                sib = p_noidung.find_next_sibling()
+                while sib is not None and sib.name == "a":
+                    link = sib.get("href")
+                    if link:
+                        try:
+                            PDFile.insert(dieu_id=mapc, link=link, path="").on_conflict_ignore().execute()
+                        except Exception as e:
+                            print("⚠️ FAIL PDFile:", mapc, link, e)
+                    sib = sib.find_next_sibling()
 
-            # Lấy các điều có liên quan, nếu có:
-            if element and element.name == "p" and element["class"] and element["class"][0] == "pChiDan":
-                lienquans_html = element.select("a")
-                for lienquan_html in lienquans_html:
-                    if not "onclick" in lienquan_html.attrs or lienquan_html["onclick"] == "":
-                        continue
-                    mapc_lienquan = extract_input(lienquan_html["onclick"]).replace("'", "")
-                    dieus_lienquan.append({"dieu_id1": dieu["MAPC"], "dieu_id2": mapc_lienquan})
+                # liên quan: <p class='pChiDan'>
+                if sib is not None and sib.name == "p" and sib.get("class") and sib.get("class")[0] == "pChiDan":
+                    for a_lq in sib.select("a[onclick]"):
+                        onclick = a_lq.get("onclick", "")
+                        if onclick:
+                            mapc_lq = extract_input(onclick).replace("'", "")
+                            lienquan_pairs.append((mapc, mapc_lq))
 
-            stt += 1
-        demuc_file.close()
+            stt_dieu += 1
 
-print("Inserted tất cả nodes pháp điển!")
+    # ===== 5) Insert liên quan (chỉ insert khi cả 2 điều tồn tại) =====
+    print("Insert pdmuclienquan...")
+    for id1, id2 in lienquan_pairs:
+        if PDDieu.get_or_none(PDDieu.mapc == id1) is None:
+            continue
+        if PDDieu.get_or_none(PDDieu.mapc == id2) is None:
+            continue
+        try:
+            PDMucLienQuan.insert(dieu_id1=id1, dieu_id2=id2).on_conflict_ignore().execute()
+        except Exception:
+            pass
 
-for dieu_lienquan in dieus_lienquan:
-    try:
-        PDMucLienQuan.create(dieu_id1=dieu_lienquan["dieu_id1"], dieu_id2=dieu_lienquan["dieu_id2"])
-    except:
-        print(f'Không thể insert liên quan {dieu_lienquan["dieu_id1"]} - {dieu_lienquan["dieu_id2"]}')
-    print(f'Inserted liên quan {dieu_lienquan["dieu_id1"]} - {dieu_lienquan["dieu_id2"]}')
+    print("✅ DONE")
 
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 services:
-    main-mysql:
+    law-mysql:
         image: mysql:latest
         ports:
             - 3306:3306
@@ -25,3 +25,5 @@ services:
 networks:
     app-network:
         driver: bridge
+
+

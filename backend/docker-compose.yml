@@ -37,7 +37,7 @@ services:
   phpmyadmin:
     image: phpmyadmin
     ports:
-      - 8081:80
+      - 8082:80
     depends_on:
       - law-mysql
     networks:
@@ -136,15 +136,7 @@ services:
       QA_MODEL_PATH: namngo/videberta-xsmall-finetuned-squad
       TOPIC_DB_PATH: ./chroma_db_demuc
       REFRESH_TOKEN_KEY: auth-service
-  recommendation-service:
-    build: ./recommendation
-    restart: always
-    networks:
-      - app-network
-    environment:
-      ST_MODEL_PATH: keepitreal/vietnamese-sbert
-      QA_MODEL_PATH: namngo/videberta-xsmall-finetuned-squad
-      TOPIC_DB_PATH: ./chroma_db_demuc
+ 
 networks:
     app-network:
         driver: bridge
