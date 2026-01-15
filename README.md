@@ -113,8 +113,6 @@ Các workflows của project được lưu tại: [.github/workflows](.github/wo
 
 ## Hướng Dẫn Cài Đặt
 
-Tất cả các images build từ services backend bạn có thể tìm thấy tại [Docker Hub](https://hub.docker.com/repositories/tghuy2002?search=vnlaw).
-
 ### Yêu Cầu 📋
 
 Để cài đặt và chạy được dự án, trước tiên bạn cần phải cài đặt các công cụ bên dưới. Hãy thực hiện theo các hướng dẫn cài đặt sau, lưu ý chọn hệ điều hành phù hợp với máy tính của bạn:
@@ -136,7 +134,7 @@ git clone https://github.com/quangthai87vn/RAG-TraCuuPhapLuatVN.git vnlawadvisor
 cd vào thư mục vnlawadvisor:
 
 ```bash
-cd vnlawadvisor
+cd RAG-TraCuuPhapLuatVN
 ```
 
 #### Chạy crawler lấy dữ liệu pháp điển và các van bản quy phạm pháp luật (optional):
@@ -250,18 +248,6 @@ npm run start
 
 Lúc này web-app sẽ chạy ở địa chỉ [http://localhost:3000](http://localhost:3000).
 
-## 🙌 Đóng góp cho dự án
-
-<a href="https://github.com/CTU-LinguTechies/VN-Law-Advisor/issues/new?assignees=&labels=&projects=&template=bug_report.md&title=%F0%9F%90%9B+Bug+Report%3A+">Bug Report ⚠️
-</a>
-
-<a href="https://github.com/CTU-LinguTechies/VN-Law-Advisor/issues/new?assignees=&labels=&projects=&template=feature_request.md&title=RequestFeature:">Request Feature 👩‍💻</a>
-
-Nếu bạn muốn đóng góp cho dự án, hãy đọc [CONTRIBUTING.md](.github/CONTRIBUTING.md) để biết thêm chi tiết.
-
-Mọi đóng góp của các bạn đều được trân trọng, đừng ngần ngại gửi pull request cho dự án.
-
-## Liên hệ
 
 
 
