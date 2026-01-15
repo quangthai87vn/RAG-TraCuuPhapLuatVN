@@ -130,7 +130,7 @@ Tất cả các images build từ services backend bạn có thể tìm thấy t
 Trước hết, hãy clone dự án về máy tính của bạn:
 
 ```bash
-git clone https://github.com/CTU-LinguTechies/VN-Law-Advisor.git vnlawadvisor
+git clone https://github.com/quangthai87vn/RAG-TraCuuPhapLuatVN.git vnlawadvisor
 ```
 
 cd vào thư mục vnlawadvisor:
